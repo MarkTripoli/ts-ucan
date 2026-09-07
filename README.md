@@ -70,25 +70,24 @@ const verified = await verifyInvocation(Invocation.decode(bytes), delegationStor
 
 ### Asynchronous signing
 
-Use `Ed25519AsyncSigner` when the private key is held by an asynchronous
-provider such as Web Crypto. The callback receives the canonical bytes to
-sign; the private key is never extracted by this library.
+When the private key is only reachable through an async API (a non-extractable
+Web Crypto `CryptoKey`, a hardware token, a remote KMS), pass an
+`AsyncDidSigner` and call `tryBuildAsync()` / `revokeAsync()`. The `sign`
+callback receives the exact canonical bytes to sign; the key never enters this
+library. The result is byte-for-byte identical to the synchronous path, so
+CIDs and verification are unchanged.
 
 ```ts
-import {
-  DelegationBuilder,
-  Ed25519AsyncSigner,
-  InvocationBuilder,
-  revokeAsync,
-} from "@marktripoli/ucan";
+import type { AsyncDidSigner } from "@marktripoli/ucan";
+import { DelegationBuilder, Ed25519Did, InvocationBuilder, revokeAsync } from "@marktripoli/ucan";
 
-const signer = new Ed25519AsyncSigner(
-  aliceDid,
-  (bytes) =>
-    crypto.subtle
-      .sign("Ed25519", nonExtractablePrivateKey, bytes)
-      .then((signature) => new Uint8Array(signature)),
-);
+const { privateKey, publicKey } = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
+const aliceDid = new Ed25519Did(new Uint8Array(await crypto.subtle.exportKey("raw", publicKey)));
+
+const signer: AsyncDidSigner<Ed25519Did> = {
+  did: aliceDid,
+  sign: async (bytes) => new Uint8Array(await crypto.subtle.sign("Ed25519", privateKey, bytes as BufferSource)),
+};
 
 const delegation = await new DelegationBuilder()
   .issuer(signer)
@@ -114,6 +113,10 @@ const revocation = await revokeAsync(
   delegation.toCid(),
 );
 ```
+
+A rejected `sign` surfaces as `SignerError` with `reason: "signingError"`.
+Calling `tryBuild()` on an `AsyncDidSigner` (or `tryBuildAsync()` on a
+`DidSigner`) is a type error and throws at runtime; it never signs garbage.
 
 ## Build
 

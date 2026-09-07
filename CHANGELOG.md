@@ -2,16 +2,27 @@
 
 ### @marktripoli/ucan v0.4.0
 
-- Add `AsyncDidSigner` and `Ed25519AsyncSigner` for asynchronous Ed25519
-  callbacks, including non-extractable Web Crypto keys.
-- Add `InvocationBuilder.tryBuildAsync()`,
-  `DelegationBuilder.tryBuildAsync()`, and `revokeAsync()`.
-- Async-built tokens use the same canonical bytes, CIDs, and verification
-  path as synchronously built tokens.
+Additive. Sync `tryBuild()` / `revoke()` keep their signatures and byte output.
+
+- Add `AsyncDidSigner<D>`: `{ did: D; sign(bytes): Promise<Uint8Array> }`. The
+  `sign` callback receives the exact canonical bytes; the private key never
+  enters the library. Built for non-extractable Web Crypto `CryptoKey`s.
+- Add `InvocationBuilder.tryBuildAsync()`, `DelegationBuilder.tryBuildAsync()`,
+  and `revokeAsync()`. Output is byte-identical to the sync path for the same
+  fields and key (same CIDs, same verification).
+- A rejecting `sign` surfaces as `SignerError("signingError")`.
+- `tryBuild()` on an `AsyncDidSigner` and `tryBuildAsync()` on a `DidSigner`
+  are compile-time errors (`this`-typed) and throw at runtime.
+- `InvocationBuilder`/`DelegationBuilder` type parameter now ranges over
+  `DidSigner | AsyncDidSigner`; `issuer()` narrows the builder to the signer
+  kind passed.
 
 ### @marktripoli/varsig v0.3.0
 
-- Add asynchronous Ed25519 signing through `Varsig.trySignAsync()`.
+- `Ed25519` now implements `AsyncSign<Uint8Array, (msg) => Promise<Uint8Array>>`
+  via new `defaultTrySignAsync` (same encode-then-sign order and error mapping
+  as `defaultTrySign`). `Varsig.trySignAsync()` previously threw on Ed25519
+  because the delegate existed but the target did not.
 
 ### @marktripoli/ucan v0.3.0
 
