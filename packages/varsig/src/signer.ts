@@ -97,3 +97,29 @@ export function defaultTrySign(
   }
   return { signature, encoded: buffer };
 }
+
+/**
+ * Default asynchronous trySign implementation.
+ *
+ * Encodes the payload with the codec, then signs the encoded bytes with
+ * the provided async sign function.
+ */
+export async function defaultTrySignAsync(
+  codec: Codec,
+  signFn: (msg: Uint8Array) => Promise<Uint8Array>,
+  payload: Ipld,
+): Promise<{ signature: Uint8Array; encoded: Uint8Array }> {
+  let buffer: Uint8Array;
+  try {
+    buffer = codec.encodePayload(payload);
+  } catch (e) {
+    throw new SignerError("encodingError", String(e));
+  }
+  let signature: Uint8Array;
+  try {
+    signature = await signFn(buffer);
+  } catch (e) {
+    throw new SignerError("signingError", String(e));
+  }
+  return { signature, encoded: buffer };
+}

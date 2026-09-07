@@ -1,5 +1,18 @@
 # Changelog
 
+### @marktripoli/ucan v0.4.0
+
+- Add `AsyncDidSigner` and `Ed25519AsyncSigner` for asynchronous Ed25519
+  callbacks, including non-extractable Web Crypto keys.
+- Add `InvocationBuilder.tryBuildAsync()`,
+  `DelegationBuilder.tryBuildAsync()`, and `revokeAsync()`.
+- Async-built tokens use the same canonical bytes, CIDs, and verification
+  path as synchronously built tokens.
+
+### @marktripoli/varsig v0.3.0
+
+- Add asynchronous Ed25519 signing through `Varsig.trySignAsync()`.
+
 ### @marktripoli/ucan v0.3.0
 
 Security-hardened authorization verification. **Ed25519-only** cryptosuite for
