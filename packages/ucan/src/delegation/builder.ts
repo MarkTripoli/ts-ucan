@@ -3,7 +3,6 @@
  */
 
 import { DagCborCodec, Varsig } from "@marktripoli/varsig";
-import type { AsyncSign } from "@marktripoli/varsig";
 import type { AsyncDidSigner, Did, DidSigner } from "../did.js";
 import { Command } from "../command.js";
 import { Nonce } from "../crypto/nonce.js";
@@ -15,7 +14,6 @@ import { Delegation, delegationPayloadToIpld, type DelegationPayload } from "./i
 import type { Predicate } from "./policy/index.js";
 
 type SupportedDidSigner = DidSigner | AsyncDidSigner;
-type AsyncSignCallback = (bytes: Uint8Array) => Promise<Uint8Array>;
 
 export class DelegationBuilder<D extends SupportedDidSigner = DidSigner> {
   constructor(
@@ -188,58 +186,45 @@ export class DelegationBuilder<D extends SupportedDidSigner = DidSigner> {
     };
   }
 
-  tryBuild(): Delegation<Did> {
+  /**
+   * Sign with a synchronous `DidSigner` (secret key bytes in hand).
+   * For an `AsyncDidSigner` use `tryBuildAsync()`.
+   */
+  tryBuild(this: DelegationBuilder<DidSigner>): Delegation<Did> {
     const issuer = this.requireIssuer();
-    const payload = this.intoPayload();
-    const header = new Varsig(issuer.did.varsigConfig, DagCborCodec);
-    const sigPayload = new Map<string, Ipld>([
-      ["h", header.encode()],
-      ["ucan/dlg@1.0.0", delegationPayloadToIpld(payload)],
-    ]);
-    const syncIssuer = issuer as DidSigner;
-    const { signature } = syncIssuer.did.varsigConfig.trySign(
-      DagCborCodec,
-      syncIssuer.signer as any,
-      sigPayload,
-    );
-
-    return new Delegation<Did>({
-      signature,
-      payload: {
-        header,
-        payload,
-      },
-    });
+    if (!("signer" in issuer)) {
+      throw new Error("issuer has no synchronous signer; use tryBuildAsync()");
+    }
+    const { payload, header, sigPayload } = this.signingInput(issuer);
+    const { signature } = header.trySign(issuer.signer, sigPayload);
+    return new Delegation<Did>({ signature, payload: { header, payload } });
   }
 
-  async tryBuildAsync(): Promise<Delegation<Did>> {
+  /**
+   * Sign with an `AsyncDidSigner` (e.g. a non-extractable Web Crypto key).
+   * Produces bytes identical to `tryBuild()` for the same fields and key.
+   */
+  async tryBuildAsync(this: DelegationBuilder<AsyncDidSigner>): Promise<Delegation<Did>> {
     const issuer = this.requireIssuer();
     if (!("sign" in issuer)) {
-      throw new Error("async signer required");
+      throw new Error("issuer has no asynchronous sign(); use tryBuild()");
     }
+    const { payload, header, sigPayload } = this.signingInput(issuer);
+    // Ed25519 (the only cryptosuite) implements AsyncSign; the generic Did type
+    // only promises Sign, so the header's async signer type is not statically known.
+    const { signature } = await header.trySignAsync(issuer.sign as never, sigPayload);
+    return new Delegation<Did>({ signature, payload: { header, payload } });
+  }
+
+  /** The exact bytes both build paths sign: shared so they cannot diverge. */
+  private signingInput(issuer: D) {
     const payload = this.intoPayload();
     const header = new Varsig(issuer.did.varsigConfig, DagCborCodec);
     const sigPayload = new Map<string, Ipld>([
       ["h", header.encode()],
       ["ucan/dlg@1.0.0", delegationPayloadToIpld(payload)],
     ]);
-    const signCfg = issuer.did.varsigConfig as unknown as AsyncSign<
-      unknown,
-      AsyncSignCallback
-    >;
-    const { signature } = await signCfg.trySignAsync(
-      DagCborCodec,
-      issuer.sign,
-      sigPayload,
-    );
-
-    return new Delegation<Did>({
-      signature,
-      payload: {
-        header,
-        payload,
-      },
-    });
+    return { payload, header, sigPayload };
   }
 
   private requireIssuer(): D {

@@ -27,7 +27,19 @@ export interface DidSigner<D extends Did = Did> {
 }
 
 /**
- * A DID signer backed by an asynchronous signing operation.
+ * A DID signer whose private key is only reachable through an asynchronous
+ * `sign` callback (e.g. a non-extractable Web Crypto `CryptoKey`).
+ *
+ * `sign` receives the exact bytes to sign and returns the raw signature.
+ * Deliberately distinct from `DidSigner.signer` so the two cannot be confused
+ * at either the type or runtime level: use `tryBuildAsync()` with this shape.
+ *
+ * ```ts
+ * const signer: AsyncDidSigner<Ed25519Did> = {
+ *   did: new Ed25519Did(publicKeyBytes),
+ *   sign: async (bytes) => new Uint8Array(await crypto.subtle.sign("Ed25519", key, bytes)),
+ * };
+ * ```
  */
 export interface AsyncDidSigner<D extends Did = Did> {
   readonly did: D;
@@ -195,30 +207,6 @@ export class Ed25519Signer implements DidSigner<Ed25519Did> {
   /**
    * Convert to IPLD / serialization form.
    */
-  toIpld(): Ipld {
-    return this.did.toIpld();
-  }
-}
-
-/**
- * An Ed25519 did:key signer backed by an asynchronous callback.
- */
-export class Ed25519AsyncSigner implements AsyncDidSigner<Ed25519Did> {
-  readonly did: Ed25519Did;
-  readonly sign: (bytes: Uint8Array) => Promise<Uint8Array>;
-
-  constructor(
-    did: Ed25519Did,
-    sign: (bytes: Uint8Array) => Promise<Uint8Array>,
-  ) {
-    this.did = did;
-    this.sign = sign;
-  }
-
-  toString(): string {
-    return this.did.toString();
-  }
-
   toIpld(): Ipld {
     return this.did.toIpld();
   }

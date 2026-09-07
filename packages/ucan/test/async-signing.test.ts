@@ -1,30 +1,36 @@
-import { webcrypto } from "node:crypto";
+/**
+ * tryBuildAsync / revokeAsync: an AsyncDidSigner must produce bytes identical
+ * to the synchronous path, work with a non-extractable Web Crypto key end to
+ * end through verifyInvocation, and fail loudly when the wrong build path is
+ * used for the signer kind.
+ */
+
 import { ed25519 } from "@noble/curves/ed25519";
 import { describe, expect, it } from "vitest";
 import {
   Delegation,
   DelegationBuilder,
-  Ed25519AsyncSigner,
   Ed25519Did,
   Ed25519Signer,
+  Invocation,
   InvocationBuilder,
+  MapDelegationStore,
+  MapReplayStore,
   Nonce,
   assertValidRevocation,
   revoke,
   revokeAsync,
+  verifyInvocation,
 } from "../src/index.js";
+import type { AsyncDidSigner } from "../src/index.js";
 
-function signerPair(seed: number): {
-  sync: Ed25519Signer;
-  async: Ed25519AsyncSigner;
-} {
+function signerPair(seed: number): { sync: Ed25519Signer; async: AsyncDidSigner<Ed25519Did> } {
   const secretKey = new Uint8Array(32).fill(seed);
   const sync = new Ed25519Signer(secretKey);
-  const asyncSigner = new Ed25519AsyncSigner(
-    sync.did,
-    (bytes) => Promise.resolve(ed25519.sign(bytes, secretKey)),
-  );
-  return { sync, async: asyncSigner };
+  return {
+    sync,
+    async: { did: sync.did, sign: async (bytes) => ed25519.sign(bytes, secretKey) },
+  };
 }
 
 describe("asynchronous signing", () => {
@@ -33,7 +39,7 @@ describe("asynchronous signing", () => {
     const bob = signerPair(2);
     const nonce = Nonce.fromBytes(Uint8Array.from([1, 2, 3, 4]));
 
-    const syncInvocation = new InvocationBuilder()
+    const syncInvocation = Invocation.builder()
       .issuer(alice.sync)
       .audience(bob.sync.did)
       .subject(bob.sync.did)
@@ -41,7 +47,7 @@ describe("asynchronous signing", () => {
       .proofs([])
       .nonce(nonce)
       .tryBuild();
-    const asyncInvocation = await new InvocationBuilder()
+    const asyncInvocation = await Invocation.builder()
       .issuer(alice.async)
       .audience(bob.async.did)
       .subject(bob.async.did)
@@ -51,7 +57,7 @@ describe("asynchronous signing", () => {
       .tryBuildAsync();
 
     expect(asyncInvocation.encode()).toEqual(syncInvocation.encode());
-    expect(asyncInvocation.toCid()).toEqual(syncInvocation.toCid());
+    expect(asyncInvocation.toCid().toString()).toBe(syncInvocation.toCid().toString());
     expect(() => asyncInvocation.verifySignature()).not.toThrow();
   });
 
@@ -76,7 +82,7 @@ describe("asynchronous signing", () => {
       .tryBuildAsync();
 
     expect(asyncDelegation.encode()).toEqual(syncDelegation.encode());
-    expect(asyncDelegation.toCid()).toEqual(syncDelegation.toCid());
+    expect(asyncDelegation.toCid().toString()).toBe(syncDelegation.toCid().toString());
     expect(() => asyncDelegation.verifySignature()).not.toThrow();
   });
 
@@ -93,71 +99,85 @@ describe("asynchronous signing", () => {
     const targetCid = target.toCid();
 
     const syncRevocation = revoke(
-      new InvocationBuilder()
-        .issuer(bob.sync)
-        .audience(alice.sync.did)
-        .subject(alice.sync.did)
-        .proofs([targetCid]),
+      new InvocationBuilder().issuer(bob.sync).audience(alice.sync.did).subject(alice.sync.did).proofs([targetCid]),
       targetCid,
     );
     const asyncRevocation = await revokeAsync(
-      new InvocationBuilder()
-        .issuer(bob.async)
-        .audience(alice.async.did)
-        .subject(alice.async.did)
-        .proofs([targetCid]),
+      new InvocationBuilder().issuer(bob.async).audience(alice.async.did).subject(alice.async.did).proofs([targetCid]),
       targetCid,
     );
 
     expect(asyncRevocation.encode()).toEqual(syncRevocation.encode());
-    expect(asyncRevocation.toCid()).toEqual(syncRevocation.toCid());
-    expect(() => asyncRevocation.verifySignature()).not.toThrow();
+    expect(asyncRevocation.toCid().toString()).toBe(syncRevocation.toCid().toString());
     expect(() => assertValidRevocation(targetCid, asyncRevocation)).not.toThrow();
   });
 
-  it("round-trips a non-extractable WebCrypto Ed25519 private key", async () => {
-    const generated = await webcrypto.subtle.generateKey(
-      { name: "Ed25519" },
-      true,
-      ["sign", "verify"],
-    );
-    if (!("privateKey" in generated) || !("publicKey" in generated)) {
-      throw new Error("expected an Ed25519 key pair");
-    }
-
-    const publicKey = new Uint8Array(
-      await webcrypto.subtle.exportKey("raw", generated.publicKey),
-    );
-    const privateKeyBytes = await webcrypto.subtle.exportKey(
-      "pkcs8",
-      generated.privateKey,
-    );
-    const privateKey = await webcrypto.subtle.importKey(
-      "pkcs8",
-      privateKeyBytes,
-      { name: "Ed25519" },
-      false,
-      ["sign"],
-    );
+  it("signs with a non-extractable WebCrypto key and passes verifyInvocation", async () => {
+    // Only the private key honours `extractable: false`; the public key is always exportable.
+    const { privateKey, publicKey } = (await crypto.subtle.generateKey({ name: "Ed25519" }, false, [
+      "sign",
+      "verify",
+    ])) as CryptoKeyPair;
     expect(privateKey.extractable).toBe(false);
 
-    const signer = new Ed25519AsyncSigner(
-      new Ed25519Did(publicKey),
-      async (bytes) =>
-        new Uint8Array(
-          await webcrypto.subtle.sign("Ed25519", privateKey, bytes),
-        ),
-    );
-    const delegation = await new DelegationBuilder()
-      .issuer(signer)
-      .audience(signer.did)
-      .subject({ kind: "specific", did: signer.did })
+    const web: AsyncDidSigner<Ed25519Did> = {
+      did: new Ed25519Did(new Uint8Array(await crypto.subtle.exportKey("raw", publicKey))),
+      sign: async (bytes) => new Uint8Array(await crypto.subtle.sign("Ed25519", privateKey, bytes as BufferSource)),
+    };
+    const executor = signerPair(7).sync.did;
+
+    // Root invocation: issuer is the subject, so no proofs are needed.
+    const invocation = await new InvocationBuilder()
+      .issuer(web)
+      .audience(executor)
+      .subject(web.did)
       .commandFromStr("/read")
+      .proofs([])
       .tryBuildAsync();
 
-    expect(() => delegation.verifySignature()).not.toThrow();
-    expect(delegation.encode()).toEqual(
-      Delegation.decode(delegation.encode()).encode(),
-    );
+    const verified = await verifyInvocation(Invocation.decode(invocation.encode()), new MapDelegationStore(), {
+      executor,
+      replayStore: new MapReplayStore(),
+    });
+    expect(verified.toCid().toString()).toBe(invocation.toCid().toString());
+
+    const delegation = await new DelegationBuilder()
+      .issuer(web)
+      .audience(executor)
+      .subject({ kind: "specific", did: web.did })
+      .commandFromStr("/read")
+      .tryBuildAsync();
+    expect(() => Delegation.decode(delegation.encode()).verifySignature()).not.toThrow();
+  });
+
+  it("surfaces a rejecting callback as SignerError(signingError)", async () => {
+    const { did } = signerPair(8).sync;
+    const refusing: AsyncDidSigner<Ed25519Did> = {
+      did,
+      sign: () => Promise.reject(new Error("user declined")),
+    };
+
+    await expect(
+      new InvocationBuilder().issuer(refusing).audience(did).subject(did).commandFromStr("/read").proofs([]).tryBuildAsync(),
+    ).rejects.toMatchObject({ name: "SignerError", reason: "signingError", message: /user declined/ });
+
+    await expect(
+      new DelegationBuilder().issuer(refusing).audience(did).subject(did).commandFromStr("/read").tryBuildAsync(),
+    ).rejects.toMatchObject({ name: "SignerError", reason: "signingError" });
+  });
+
+  it("rejects the wrong build path for the signer kind, at compile time and at runtime", async () => {
+    const { sync, async } = signerPair(9);
+    const asyncBuilder = new InvocationBuilder().issuer(async).audience(sync.did).subject(sync.did).commandFromStr("/read").proofs([]);
+    const syncBuilder = new InvocationBuilder().issuer(sync).audience(sync.did).subject(sync.did).commandFromStr("/read").proofs([]);
+
+    // @ts-expect-error tryBuild requires a DidSigner
+    expect(() => asyncBuilder.tryBuild()).toThrow(/use tryBuildAsync\(\)/);
+    // @ts-expect-error tryBuildAsync requires an AsyncDidSigner
+    await expect(syncBuilder.tryBuildAsync()).rejects.toThrow(/use tryBuild\(\)/);
+
+    const asyncDelegation = new DelegationBuilder().issuer(async).audience(sync.did).subject(sync.did).commandFromStr("/read");
+    // @ts-expect-error tryBuild requires a DidSigner
+    expect(() => asyncDelegation.tryBuild()).toThrow(/use tryBuildAsync\(\)/);
   });
 });

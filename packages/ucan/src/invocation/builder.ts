@@ -4,7 +4,6 @@
 
 import type { CID } from "multiformats/cid";
 import { DagCborCodec, Varsig } from "@marktripoli/varsig";
-import type { AsyncSign } from "@marktripoli/varsig";
 import type { AsyncDidSigner, DidSigner } from "../did.js";
 import { Command } from "../command.js";
 import { Nonce } from "../crypto/nonce.js";
@@ -14,7 +13,6 @@ import { Unset } from "../unset.js";
 import { Invocation, invocationPayloadToIpld, type InvocationPayload } from "./index.js";
 
 type SupportedDidSigner = DidSigner | AsyncDidSigner;
-type AsyncSignCallback = (bytes: Uint8Array) => Promise<Uint8Array>;
 
 export class InvocationBuilder<D extends SupportedDidSigner = DidSigner> {
   constructor(
@@ -203,58 +201,45 @@ export class InvocationBuilder<D extends SupportedDidSigner = DidSigner> {
     return this.intoPayload();
   }
 
-  tryBuild(): Invocation<D["did"]> {
+  /**
+   * Sign with a synchronous `DidSigner` (secret key bytes in hand).
+   * For an `AsyncDidSigner` use `tryBuildAsync()`.
+   */
+  tryBuild(this: InvocationBuilder<DidSigner>): Invocation<D["did"]> {
     const issuer = this.requireIssuer();
-    const payload = this.intoPayload();
-    const header = new Varsig(issuer.did.varsigConfig, DagCborCodec);
-    const sigPayload = new Map<string, Ipld>([
-      ["h", header.encode()],
-      ["ucan/inv@1.0.0", invocationPayloadToIpld(payload)],
-    ]);
-    const syncIssuer = issuer as DidSigner;
-    const { signature } = syncIssuer.did.varsigConfig.trySign(
-      DagCborCodec,
-      syncIssuer.signer as never,
-      sigPayload,
-    );
-
-    return new Invocation({
-      signature,
-      payload: {
-        header,
-        payload,
-      },
-    });
+    if (!("signer" in issuer)) {
+      throw new Error("issuer has no synchronous signer; use tryBuildAsync()");
+    }
+    const { payload, header, sigPayload } = this.signingInput(issuer);
+    const { signature } = header.trySign(issuer.signer, sigPayload);
+    return new Invocation({ signature, payload: { header, payload } });
   }
 
-  async tryBuildAsync(): Promise<Invocation<D["did"]>> {
+  /**
+   * Sign with an `AsyncDidSigner` (e.g. a non-extractable Web Crypto key).
+   * Produces bytes identical to `tryBuild()` for the same fields and key.
+   */
+  async tryBuildAsync(this: InvocationBuilder<AsyncDidSigner>): Promise<Invocation<D["did"]>> {
     const issuer = this.requireIssuer();
     if (!("sign" in issuer)) {
-      throw new Error("async signer required");
+      throw new Error("issuer has no asynchronous sign(); use tryBuild()");
     }
+    const { payload, header, sigPayload } = this.signingInput(issuer);
+    // Ed25519 (the only cryptosuite) implements AsyncSign; the generic Did type
+    // only promises Sign, so the header's async signer type is not statically known.
+    const { signature } = await header.trySignAsync(issuer.sign as never, sigPayload);
+    return new Invocation({ signature, payload: { header, payload } });
+  }
+
+  /** The exact bytes both build paths sign: shared so they cannot diverge. */
+  private signingInput(issuer: D) {
     const payload = this.intoPayload();
     const header = new Varsig(issuer.did.varsigConfig, DagCborCodec);
     const sigPayload = new Map<string, Ipld>([
       ["h", header.encode()],
       ["ucan/inv@1.0.0", invocationPayloadToIpld(payload)],
     ]);
-    const signCfg = issuer.did.varsigConfig as unknown as AsyncSign<
-      unknown,
-      AsyncSignCallback
-    >;
-    const { signature } = await signCfg.trySignAsync(
-      DagCborCodec,
-      issuer.sign,
-      sigPayload,
-    );
-
-    return new Invocation({
-      signature,
-      payload: {
-        header,
-        payload,
-      },
-    });
+    return { payload, header, sigPayload };
   }
 
   private intoPayload(): InvocationPayload<D["did"]> {

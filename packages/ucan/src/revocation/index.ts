@@ -23,11 +23,11 @@ import type { DelegationStore } from "../delegation/store.js";
  */
 export const REVOKE_COMMAND = Command.parse("/ucan/revoke");
 
-export function revoke<DSigner extends DidSigner>(
+function revocationBuilder<DSigner extends DidSigner | AsyncDidSigner>(
   builder: InvocationBuilder<DSigner>,
   revoked: CID,
-  path: CID[] = [],
-): Invocation<DSigner["did"]> {
+  path: CID[],
+): InvocationBuilder<DSigner> {
   const args = new Map<string, Ipld>([["revoke", revoked]]);
 
   if (path.length > 0) {
@@ -39,26 +39,24 @@ export function revoke<DSigner extends DidSigner>(
   return builder
     .command(REVOKE_COMMAND)
     .arguments(args)
-    .nonce(Nonce.fromBytes(new Uint8Array()))
-    .tryBuild();
+    .nonce(Nonce.fromBytes(new Uint8Array()));
 }
 
-export async function revokeAsync<DSigner extends AsyncDidSigner>(
+export function revoke<DSigner extends DidSigner>(
+  builder: InvocationBuilder<DSigner>,
+  revoked: CID,
+  path: CID[] = [],
+): Invocation<DSigner["did"]> {
+  return revocationBuilder(builder, revoked, path).tryBuild();
+}
+
+/** `revoke()` for an `AsyncDidSigner`; same bytes as the sync form. */
+export function revokeAsync<DSigner extends AsyncDidSigner>(
   builder: InvocationBuilder<DSigner>,
   revoked: CID,
   path: CID[] = [],
 ): Promise<Invocation<DSigner["did"]>> {
-  const args = new Map<string, Ipld>([["revoke", revoked]]);
-
-  if (path.length > 0) {
-    args.set("path", path);
-  }
-
-  return builder
-    .command(REVOKE_COMMAND)
-    .arguments(args)
-    .nonce(Nonce.fromBytes(new Uint8Array()))
-    .tryBuildAsync();
+  return revocationBuilder(builder, revoked, path).tryBuildAsync();
 }
 
 export interface RevocationStore<D extends Did = Did> {
