@@ -4,7 +4,8 @@
 
 import type { CID } from "multiformats/cid";
 import { DagCborCodec, Varsig } from "@marktripoli/varsig";
-import type { DidSigner } from "../did.js";
+import type { AsyncSign } from "@marktripoli/varsig";
+import type { AsyncDidSigner, DidSigner } from "../did.js";
 import { Command } from "../command.js";
 import { Nonce } from "../crypto/nonce.js";
 import type { Ipld } from "../ipld.js";
@@ -12,7 +13,10 @@ import { Timestamp } from "../time/index.js";
 import { Unset } from "../unset.js";
 import { Invocation, invocationPayloadToIpld, type InvocationPayload } from "./index.js";
 
-export class InvocationBuilder<D extends DidSigner = DidSigner> {
+type SupportedDidSigner = DidSigner | AsyncDidSigner;
+type AsyncSignCallback = (bytes: Uint8Array) => Promise<Uint8Array>;
+
+export class InvocationBuilder<D extends SupportedDidSigner = DidSigner> {
   constructor(
     public issuerField: D | typeof Unset = Unset,
     public audienceField: D["did"] | typeof Unset = Unset,
@@ -27,8 +31,8 @@ export class InvocationBuilder<D extends DidSigner = DidSigner> {
     public nonceField: Nonce | null = null,
   ) {}
 
-  issuer(issuer: D): InvocationBuilder<D> {
-    return new InvocationBuilder(
+  issuer<S extends SupportedDidSigner>(issuer: S): InvocationBuilder<S> {
+    return new InvocationBuilder<S>(
       issuer,
       this.audienceField,
       this.subjectField,
@@ -207,7 +211,42 @@ export class InvocationBuilder<D extends DidSigner = DidSigner> {
       ["h", header.encode()],
       ["ucan/inv@1.0.0", invocationPayloadToIpld(payload)],
     ]);
-    const { signature } = issuer.did.varsigConfig.trySign(DagCborCodec, issuer.signer as never, sigPayload);
+    const syncIssuer = issuer as DidSigner;
+    const { signature } = syncIssuer.did.varsigConfig.trySign(
+      DagCborCodec,
+      syncIssuer.signer as never,
+      sigPayload,
+    );
+
+    return new Invocation({
+      signature,
+      payload: {
+        header,
+        payload,
+      },
+    });
+  }
+
+  async tryBuildAsync(): Promise<Invocation<D["did"]>> {
+    const issuer = this.requireIssuer();
+    if (!("sign" in issuer)) {
+      throw new Error("async signer required");
+    }
+    const payload = this.intoPayload();
+    const header = new Varsig(issuer.did.varsigConfig, DagCborCodec);
+    const sigPayload = new Map<string, Ipld>([
+      ["h", header.encode()],
+      ["ucan/inv@1.0.0", invocationPayloadToIpld(payload)],
+    ]);
+    const signCfg = issuer.did.varsigConfig as unknown as AsyncSign<
+      unknown,
+      AsyncSignCallback
+    >;
+    const { signature } = await signCfg.trySignAsync(
+      DagCborCodec,
+      issuer.sign,
+      sigPayload,
+    );
 
     return new Invocation({
       signature,

@@ -1,7 +1,7 @@
 import { ed25519 } from "@noble/curves/ed25519";
 import { defaultTryVerify, VerificationError } from "../verify.js";
-import type { Sign } from "../signer.js";
-import { defaultTrySign } from "../signer.js";
+import type { AsyncSign, Sign } from "../signer.js";
+import { defaultTrySign, defaultTrySignAsync } from "../signer.js";
 import type { TryFromTags } from "../header.js";
 import type { Codec } from "../codec.js";
 import type { Ipld } from "../ipld.js";
@@ -12,7 +12,11 @@ import type { Ipld } from "../ipld.js";
  * Uses the Edwards25519 curve with SHA2-512 hashing (EdDSA).
  * Verifier = 32-byte public key. Signer = 32-byte secret key.
  */
-export class Ed25519 implements Sign<Uint8Array, Uint8Array> {
+export class Ed25519
+  implements
+    Sign<Uint8Array, Uint8Array>,
+    AsyncSign<Uint8Array, (msg: Uint8Array) => Promise<Uint8Array>>
+{
   prefix(): 0xed {
     return 0xed;
   }
@@ -52,6 +56,14 @@ export class Ed25519 implements Sign<Uint8Array, Uint8Array> {
       (msg) => ed25519.sign(msg, signer),
       payload,
     );
+  }
+
+  trySignAsync(
+    codec: Codec,
+    signer: (msg: Uint8Array) => Promise<Uint8Array>,
+    payload: Ipld,
+  ): Promise<{ signature: Uint8Array; encoded: Uint8Array }> {
+    return defaultTrySignAsync(codec, signer, payload);
   }
 }
 

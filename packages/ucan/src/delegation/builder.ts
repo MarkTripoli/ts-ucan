@@ -3,7 +3,8 @@
  */
 
 import { DagCborCodec, Varsig } from "@marktripoli/varsig";
-import type { Did, DidSigner } from "../did.js";
+import type { AsyncSign } from "@marktripoli/varsig";
+import type { AsyncDidSigner, Did, DidSigner } from "../did.js";
 import { Command } from "../command.js";
 import { Nonce } from "../crypto/nonce.js";
 import type { Ipld } from "../ipld.js";
@@ -13,9 +14,12 @@ import type { DelegatedSubject } from "./subject.js";
 import { Delegation, delegationPayloadToIpld, type DelegationPayload } from "./index.js";
 import type { Predicate } from "./policy/index.js";
 
-export class DelegationBuilder {
+type SupportedDidSigner = DidSigner | AsyncDidSigner;
+type AsyncSignCallback = (bytes: Uint8Array) => Promise<Uint8Array>;
+
+export class DelegationBuilder<D extends SupportedDidSigner = DidSigner> {
   constructor(
-    private readonly issuerField: DidSigner | typeof Unset = Unset,
+    private readonly issuerField: D | typeof Unset = Unset,
     private readonly audienceField: Did | typeof Unset = Unset,
     private readonly subjectField: DelegatedSubject<Did> | typeof Unset = Unset,
     private readonly commandField: Command | typeof Unset = Unset,
@@ -26,8 +30,8 @@ export class DelegationBuilder {
     private readonly nonceField: Nonce | null = null,
   ) {}
 
-  issuer(issuer: DidSigner): DelegationBuilder {
-    return new DelegationBuilder(
+  issuer<S extends SupportedDidSigner>(issuer: S): DelegationBuilder<S> {
+    return new DelegationBuilder<S>(
       issuer,
       this.audienceField,
       this.subjectField,
@@ -40,8 +44,8 @@ export class DelegationBuilder {
     );
   }
 
-  audience(audience: Did): DelegationBuilder {
-    return new DelegationBuilder(
+  audience(audience: Did): DelegationBuilder<D> {
+    return new DelegationBuilder<D>(
       this.issuerField,
       audience,
       this.subjectField,
@@ -54,13 +58,13 @@ export class DelegationBuilder {
     );
   }
 
-  subject(subject: Did | DelegatedSubject<Did>): DelegationBuilder {
+  subject(subject: Did | DelegatedSubject<Did>): DelegationBuilder<D> {
     const nextSubject: DelegatedSubject<Did> =
       typeof subject === "object" && subject !== null && "kind" in subject
         ? (subject as DelegatedSubject<Did>)
         : ({ kind: "specific", did: subject as Did } as DelegatedSubject<Did>);
 
-    return new DelegationBuilder(
+    return new DelegationBuilder<D>(
       this.issuerField,
       this.audienceField,
       nextSubject,
@@ -73,8 +77,8 @@ export class DelegationBuilder {
     );
   }
 
-  command(command: Command): DelegationBuilder {
-    return new DelegationBuilder(
+  command(command: Command): DelegationBuilder<D> {
+    return new DelegationBuilder<D>(
       this.issuerField,
       this.audienceField,
       this.subjectField,
@@ -87,12 +91,12 @@ export class DelegationBuilder {
     );
   }
 
-  commandFromStr(s: string): DelegationBuilder {
+  commandFromStr(s: string): DelegationBuilder<D> {
     return this.command(Command.parse(s));
   }
 
-  policy(policy: Predicate[]): DelegationBuilder {
-    return new DelegationBuilder(
+  policy(policy: Predicate[]): DelegationBuilder<D> {
+    return new DelegationBuilder<D>(
       this.issuerField,
       this.audienceField,
       this.subjectField,
@@ -105,8 +109,8 @@ export class DelegationBuilder {
     );
   }
 
-  expiration(expiration: Timestamp): DelegationBuilder {
-    return new DelegationBuilder(
+  expiration(expiration: Timestamp): DelegationBuilder<D> {
+    return new DelegationBuilder<D>(
       this.issuerField,
       this.audienceField,
       this.subjectField,
@@ -119,8 +123,8 @@ export class DelegationBuilder {
     );
   }
 
-  notBefore(notBefore: Timestamp): DelegationBuilder {
-    return new DelegationBuilder(
+  notBefore(notBefore: Timestamp): DelegationBuilder<D> {
+    return new DelegationBuilder<D>(
       this.issuerField,
       this.audienceField,
       this.subjectField,
@@ -133,8 +137,8 @@ export class DelegationBuilder {
     );
   }
 
-  meta(meta: Map<string, Ipld>): DelegationBuilder {
-    return new DelegationBuilder(
+  meta(meta: Map<string, Ipld>): DelegationBuilder<D> {
+    return new DelegationBuilder<D>(
       this.issuerField,
       this.audienceField,
       this.subjectField,
@@ -147,8 +151,8 @@ export class DelegationBuilder {
     );
   }
 
-  nonce(nonce: Nonce): DelegationBuilder {
-    return new DelegationBuilder(
+  nonce(nonce: Nonce): DelegationBuilder<D> {
+    return new DelegationBuilder<D>(
       this.issuerField,
       this.audienceField,
       this.subjectField,
@@ -161,7 +165,7 @@ export class DelegationBuilder {
     );
   }
 
-  issueNow(): DelegationBuilder {
+  issueNow(): DelegationBuilder<D> {
     return this.notBefore(Timestamp.now());
   }
 
@@ -192,7 +196,12 @@ export class DelegationBuilder {
       ["h", header.encode()],
       ["ucan/dlg@1.0.0", delegationPayloadToIpld(payload)],
     ]);
-    const { signature } = issuer.did.varsigConfig.trySign(DagCborCodec, issuer.signer as any, sigPayload);
+    const syncIssuer = issuer as DidSigner;
+    const { signature } = syncIssuer.did.varsigConfig.trySign(
+      DagCborCodec,
+      syncIssuer.signer as any,
+      sigPayload,
+    );
 
     return new Delegation<Did>({
       signature,
@@ -203,7 +212,37 @@ export class DelegationBuilder {
     });
   }
 
-  private requireIssuer(): DidSigner {
+  async tryBuildAsync(): Promise<Delegation<Did>> {
+    const issuer = this.requireIssuer();
+    if (!("sign" in issuer)) {
+      throw new Error("async signer required");
+    }
+    const payload = this.intoPayload();
+    const header = new Varsig(issuer.did.varsigConfig, DagCborCodec);
+    const sigPayload = new Map<string, Ipld>([
+      ["h", header.encode()],
+      ["ucan/dlg@1.0.0", delegationPayloadToIpld(payload)],
+    ]);
+    const signCfg = issuer.did.varsigConfig as unknown as AsyncSign<
+      unknown,
+      AsyncSignCallback
+    >;
+    const { signature } = await signCfg.trySignAsync(
+      DagCborCodec,
+      issuer.sign,
+      sigPayload,
+    );
+
+    return new Delegation<Did>({
+      signature,
+      payload: {
+        header,
+        payload,
+      },
+    });
+  }
+
+  private requireIssuer(): D {
     if (this.issuerField === Unset) {
       throw new Error("missing required field: issuer");
     }

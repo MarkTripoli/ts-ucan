@@ -27,6 +27,14 @@ export interface DidSigner<D extends Did = Did> {
 }
 
 /**
+ * A DID signer backed by an asynchronous signing operation.
+ */
+export interface AsyncDidSigner<D extends Did = Did> {
+  readonly did: D;
+  sign(bytes: Uint8Array): Promise<Uint8Array>;
+}
+
+/**
  * An Ed25519 did:key.
  *
  * Format: did:key:z + base58btc of [0xed, 0x01, ...32 pubkey bytes]
@@ -187,6 +195,30 @@ export class Ed25519Signer implements DidSigner<Ed25519Did> {
   /**
    * Convert to IPLD / serialization form.
    */
+  toIpld(): Ipld {
+    return this.did.toIpld();
+  }
+}
+
+/**
+ * An Ed25519 did:key signer backed by an asynchronous callback.
+ */
+export class Ed25519AsyncSigner implements AsyncDidSigner<Ed25519Did> {
+  readonly did: Ed25519Did;
+  readonly sign: (bytes: Uint8Array) => Promise<Uint8Array>;
+
+  constructor(
+    did: Ed25519Did,
+    sign: (bytes: Uint8Array) => Promise<Uint8Array>,
+  ) {
+    this.did = did;
+    this.sign = sign;
+  }
+
+  toString(): string {
+    return this.did.toString();
+  }
+
   toIpld(): Ipld {
     return this.did.toIpld();
   }

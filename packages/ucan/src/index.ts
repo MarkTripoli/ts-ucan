@@ -60,8 +60,13 @@ export {
 } from "./promise.js";
 
 // DID
-export type { Did, DidSigner } from "./did.js";
-export { Ed25519Did, Ed25519Signer, Ed25519DidFromStrError } from "./did.js";
+export type { Did, DidSigner, AsyncDidSigner } from "./did.js";
+export {
+  Ed25519Did,
+  Ed25519Signer,
+  Ed25519AsyncSigner,
+  Ed25519DidFromStrError,
+} from "./did.js";
 export type { Ed25519DidFromStrErrorReason, VarsigConfigOf } from "./did.js";
 
 // Unset & sealed (builder type markers)
@@ -134,6 +139,7 @@ export type { ReplayStore } from "./invocation/verify.js";
 export {
   REVOKE_COMMAND,
   revoke,
+  revokeAsync,
   MapRevocationStore,
   RevokedError,
   InvalidRevocationError,

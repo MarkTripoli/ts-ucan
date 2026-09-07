@@ -145,4 +145,21 @@ describe("test_try_verify", () => {
 
     expect(() => varsig.tryVerify(pk, payload, badSig)).toThrow();
   });
+
+  it("signs and verifies asynchronously", async () => {
+    const payload: Ipld = new Map<string, Ipld>([
+      ["message", "Hello, async Varsig!"],
+      ["count", 42],
+    ]);
+    const sk = ed25519.utils.randomPrivateKey();
+    const pk = ed25519.getPublicKey(sk);
+    const varsig = new Varsig(new Ed25519(), DagCborCodec);
+
+    const { signature } = await varsig.trySignAsync(
+      (message) => Promise.resolve(ed25519.sign(message, sk)),
+      payload,
+    );
+
+    expect(() => varsig.tryVerify(pk, payload, signature)).not.toThrow();
+  });
 });

@@ -3,7 +3,7 @@
  */
 
 import { CID } from "multiformats/cid";
-import type { Did, DidSigner } from "../did.js";
+import type { AsyncDidSigner, Did, DidSigner } from "../did.js";
 import { Command } from "../command.js";
 import { Nonce } from "../crypto/nonce.js";
 import type { Ipld } from "../ipld.js";
@@ -41,6 +41,24 @@ export function revoke<DSigner extends DidSigner>(
     .arguments(args)
     .nonce(Nonce.fromBytes(new Uint8Array()))
     .tryBuild();
+}
+
+export async function revokeAsync<DSigner extends AsyncDidSigner>(
+  builder: InvocationBuilder<DSigner>,
+  revoked: CID,
+  path: CID[] = [],
+): Promise<Invocation<DSigner["did"]>> {
+  const args = new Map<string, Ipld>([["revoke", revoked]]);
+
+  if (path.length > 0) {
+    args.set("path", path);
+  }
+
+  return builder
+    .command(REVOKE_COMMAND)
+    .arguments(args)
+    .nonce(Nonce.fromBytes(new Uint8Array()))
+    .tryBuildAsync();
 }
 
 export interface RevocationStore<D extends Did = Did> {

@@ -68,6 +68,53 @@ const verified = await verifyInvocation(Invocation.decode(bytes), delegationStor
 // on untrusted input — use verifyInvocation for that.
 ```
 
+### Asynchronous signing
+
+Use `Ed25519AsyncSigner` when the private key is held by an asynchronous
+provider such as Web Crypto. The callback receives the canonical bytes to
+sign; the private key is never extracted by this library.
+
+```ts
+import {
+  DelegationBuilder,
+  Ed25519AsyncSigner,
+  InvocationBuilder,
+  revokeAsync,
+} from "@marktripoli/ucan";
+
+const signer = new Ed25519AsyncSigner(
+  aliceDid,
+  (bytes) =>
+    crypto.subtle
+      .sign("Ed25519", nonExtractablePrivateKey, bytes)
+      .then((signature) => new Uint8Array(signature)),
+);
+
+const delegation = await new DelegationBuilder()
+  .issuer(signer)
+  .audience(bobDid)
+  .subject({ kind: "specific", did: aliceDid })
+  .commandFromStr("/crud/create")
+  .tryBuildAsync();
+
+const invocation = await new InvocationBuilder()
+  .issuer(signer)
+  .audience(bobDid)
+  .subject(bobDid)
+  .commandFromStr("/crud/create")
+  .proofs([delegation.toCid()])
+  .tryBuildAsync();
+
+const revocation = await revokeAsync(
+  new InvocationBuilder()
+    .issuer(signer)
+    .audience(aliceDid)
+    .subject(aliceDid)
+    .proofs([delegation.toCid()]),
+  delegation.toCid(),
+);
+```
+
 ## Build
 
 ```sh
