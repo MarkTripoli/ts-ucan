@@ -91,8 +91,8 @@ export const webCryptoTryFromTags: TryFromTags<WebCrypto> = (tags: number[]) => 
 
   switch (first) {
     case 0xec:
-      if (second === 0x1201 && third === 0x15) return { config: new Es256(), rest };
-      if (second === 0x1202 && third === 0x20) return { config: new Es384(), rest };
+      if (second === 0x1200 && third === 0x12) return { config: new Es256(), rest };
+      if (second === 0x1201 && third === 0x20) return { config: new Es384(), rest };
       if (second === 0x1202 && third === 0x13) return { config: new Es512(), rest };
       return null;
     case 0xed:

@@ -44,8 +44,8 @@ export class Es256 implements Verify<Uint8Array> {
     return 0xec;
   }
 
-  configTags(): [0x1201, 0x15] {
-    return [0x1201, 0x15];
+  configTags(): [0x1200, 0x12] {
+    return [0x1200, 0x12];
   }
 
   tryDecodeSignature(signature: Uint8Array): void {
@@ -70,8 +70,8 @@ export const es256TryFromTags: TryFromTags<Es256> = (
   if (
     tags.length >= 3 &&
     tags[0] === 0xec &&
-    tags[1] === 0x1201 &&
-    tags[2] === 0x15
+    tags[1] === 0x1200 &&
+    tags[2] === 0x12
   ) {
     return { config: new Es256(), rest: tags.slice(3) };
   }
@@ -88,8 +88,8 @@ export class Es384 implements Verify<Uint8Array> {
     return 0xec;
   }
 
-  configTags(): [0x1202, 0x20] {
-    return [0x1202, 0x20];
+  configTags(): [0x1201, 0x20] {
+    return [0x1201, 0x20];
   }
 
   tryDecodeSignature(signature: Uint8Array): void {
@@ -114,7 +114,7 @@ export const es384TryFromTags: TryFromTags<Es384> = (
   if (
     tags.length >= 3 &&
     tags[0] === 0xec &&
-    tags[1] === 0x1202 &&
+    tags[1] === 0x1201 &&
     tags[2] === 0x20
   ) {
     return { config: new Es384(), rest: tags.slice(3) };
